@@ -128,7 +128,6 @@ fi
 
 # Configure the runner
 log "Configuring runner..."
-RUNNER_ALLOW_RUNASROOT=1
 
 CONFIG_OPTS="--url $REPO_URL --token $REG_TOKEN --name $RUNNER_NAME --work $WORKDIR --labels $RUNNER_LABELS --unattended"
 
@@ -137,6 +136,7 @@ if [ "$EPHEMERAL" = "true" ]; then
 fi
 
 # Run configuration as the runner would normally run
+# shellcheck disable=SC2086
 if ! ./config.sh $CONFIG_OPTS; then
     log "ERROR: Failed to configure runner"
     exit 1
