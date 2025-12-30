@@ -1,6 +1,6 @@
 # GitHub Actions Runner Home Assistant Add-on
 
-Runs a GitHub self-hosted runner inside Home Assistant Supervisor using the official `actions/runner` image.
+Runs a GitHub self-hosted runner inside Home Assistant Supervisor by downloading the official `actions/runner` tarball pinned to a version.
 
 ## Installation
 1. Copy this repository into your Home Assistant add-ons folder (e.g. `/addon_local/github-actions-runner`).
