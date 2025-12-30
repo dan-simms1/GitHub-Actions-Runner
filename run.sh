@@ -115,19 +115,34 @@ get_latest_runner_version() {
 }
 
 install_runner_deps_if_possible() {
-  # Works on Debian based images. Alpine uses image-provided deps instead.
-  if command -v apk >/dev/null 2>&1; then
-    log info "Skipping dependency install script on Alpine"
-    return
-  fi
-  if [[ -r /etc/os-release ]] && grep -qi '^ID=alpine' /etc/os-release; then
-    log info "Skipping dependency install script on Alpine"
-    return
-  fi
   if [[ -x "./bin/installdependencies.sh" ]]; then
     log info "Installing GitHub runner dependencies"
     ./bin/installdependencies.sh || log warn "Dependency install script failed, continuing"
   fi
+}
+
+log_system_info() {
+  log info "System diagnostics: uname=$(uname -a)"
+  if [[ -r /etc/os-release ]]; then
+    while IFS= read -r line; do
+      log info "os-release: ${line}"
+    done < /etc/os-release
+  else
+    log warn "/etc/os-release not found"
+  fi
+  if command -v apt-get >/dev/null 2>&1; then
+    log info "Package manager: apt-get"
+  else
+    log warn "Package manager: none detected (no apt-get)"
+  fi
+  if command -v ldd >/dev/null 2>&1; then
+    log info "ldd: $(ldd --version 2>&1 | head -n1)"
+  fi
+  for ldso in /lib/ld-linux* /lib64/ld-linux* /usr/lib/ld-linux*; do
+    if [[ -e "${ldso}" ]]; then
+      log info "ld-so present: ${ldso}"
+    fi
+  done
 }
 
 ensure_runner_downloaded() {
@@ -190,7 +205,7 @@ cleanup_runner() {
 
 start_runner_as_runner() {
   log info "Starting GitHub Actions runner service (as runner user)"
-  as_runner env ${RUNNER_ENV_VARS:-} ./run.sh &
+  as_runner ./run.sh &
   local pid=$!
   sleep 2
   if kill -0 "${pid}" 2>/dev/null; then
@@ -251,22 +266,11 @@ main() {
 
   export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
   export HOME="/opt/gha"
-  RUNNER_ENV_VARS=""
-  if command -v apk >/dev/null 2>&1; then
-    export DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
-    log warn "Using invariant globalization on Alpine (.NET ICU dependencies not available)"
-    RUNNER_ENV_VARS="DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1"
-    if [[ -f /lib/libgcompat.so.0 ]]; then
-      export LD_PRELOAD="/lib/libgcompat.so.0${LD_PRELOAD:+:${LD_PRELOAD}}"
-      log info "Enabled gcompat preload for Alpine"
-    elif [[ -f /usr/lib/libgcompat.so.0 ]]; then
-      export LD_PRELOAD="/usr/lib/libgcompat.so.0${LD_PRELOAD:+:${LD_PRELOAD}}"
-      log info "Enabled gcompat preload for Alpine"
-    fi
-  fi
 
   local runner_arch
   runner_arch="$(detect_arch)"
+
+  log_system_info
 
   # Ensure workdir exists and is writable by runner
   mkdir -p "${workdir}"
@@ -286,7 +290,7 @@ main() {
 
   log info "Configuring runner '${runner_name}' (ephemeral=${ephemeral}) for ${repo_url}"
   if [[ "${ephemeral}" == "true" ]]; then
-    as_runner env ${RUNNER_ENV_VARS} ./config.sh \
+    as_runner ./config.sh \
       --url "${repo_url}" \
       --token "${github_token}" \
       --name "${runner_name}" \
@@ -295,7 +299,7 @@ main() {
       --unattended \
       --ephemeral
   else
-    as_runner env ${RUNNER_ENV_VARS} ./config.sh \
+    as_runner ./config.sh \
       --url "${repo_url}" \
       --token "${github_token}" \
       --name "${runner_name}" \
