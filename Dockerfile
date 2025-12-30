@@ -30,6 +30,7 @@ RUN set -eux; \
 RUN useradd -m -d /opt/gha -s /bin/bash runner \
     && mkdir -p /opt/gha \
     && chown -R runner:runner /opt/gha \
+    && touch /data/options.json \
     && chmod 644 /data/options.json \
     && chown -R runner:runner /data/options.json 
 
