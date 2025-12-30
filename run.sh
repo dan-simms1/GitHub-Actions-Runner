@@ -1,0 +1,215 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+OPTIONS_FILE="/data/options.json"
+RUNNER_ROOT="/opt/gha/actions-runner"
+DEFAULT_RUNNER_VERSION="2.317.0"
+CLEANUP_ON_STOP="true"
+
+level_to_num() {
+  case "${1,,}" in
+    debug) echo 0 ;;
+    info) echo 1 ;;
+    warn|warning) echo 2 ;;
+    error) echo 3 ;;
+    *) echo 1 ;;
+  esac
+}
+
+LOG_LEVEL="${LOG_LEVEL:-info}"
+CURRENT_LOG_LEVEL="$(level_to_num "${LOG_LEVEL}")"
+
+log() {
+  local level="${1,,}"
+  shift || true
+  local msg="$*"
+  local lvl_num
+  lvl_num="$(level_to_num "${level}")"
+  if [[ "${lvl_num}" -lt "${CURRENT_LOG_LEVEL}" ]]; then
+    return
+  fi
+  printf '%s [%s] %s\n' "$(date --iso-8601=seconds)" "${level^^}" "${msg}"
+}
+
+require_file() {
+  if [[ ! -f "${1}" ]]; then
+    log error "Required file ${1} not found"
+    exit 1
+  fi
+}
+
+load_option() {
+  local key="${1}"
+  local default="${2:-}"
+  jq -r --arg key "${key}" --arg default "${default}" \
+    'if has($key) and .[$key] != null then .[$key] else $default end' \
+    "${OPTIONS_FILE}"
+}
+
+require_nonempty() {
+  local name="${1}"
+  local value="${2}"
+  if [[ -z "${value}" ]]; then
+    log error "Required option '${name}' is missing or empty"
+    exit 1
+  fi
+}
+
+detect_arch() {
+  local arch
+  arch="$(uname -m)"
+  case "${arch}" in
+    x86_64|amd64) echo "x64" ;;
+    aarch64|arm64) echo "arm64" ;;
+    armv7l|armv7) echo "arm" ;;
+    i386|i686)
+      log warn "Upstream runner has no dedicated i386 build; falling back to x64 tarball"
+      echo "x64"
+      ;;
+    *)
+      log error "Unsupported architecture: ${arch}"
+      exit 1
+      ;;
+  esac
+}
+
+ensure_runner_dir() {
+  mkdir -p "${RUNNER_ROOT}"
+  cd "${RUNNER_ROOT}"
+}
+
+ensure_runner_downloaded() {
+  local runner_arch="${1}"
+  local runner_version="${2}"
+  local cached_version=""
+  if [[ -f ".runner_version" ]]; then
+    cached_version="$(< .runner_version)"
+  fi
+  if [[ "${cached_version}" == "${runner_version}" && -x "./bin/Runner.Listener" ]]; then
+    log info "Using cached runner version ${runner_version}"
+    return
+  fi
+
+  log info "Downloading GitHub Actions runner v${runner_version} for ${runner_arch}"
+  rm -rf ./*
+
+  local tgz="actions-runner-linux-${runner_arch}-${runner_version}.tar.gz"
+  local base_url="https://github.com/actions/runner/releases/download/v${runner_version}"
+
+  curl -fsSL -o "${tgz}" "${base_url}/${tgz}"
+  if curl -fsSL -o "${tgz}.sha256" "${base_url}/${tgz}.sha256"; then
+    local expected
+    expected="$(cut -d ' ' -f1 < "${tgz}.sha256")"
+    if [[ -n "${expected}" ]]; then
+      echo "${expected}  ${tgz}" | sha256sum -c -
+    else
+      log warn "Checksum file empty; skipping verification"
+    fi
+  else
+    log warn "Checksum not available; skipping verification"
+  fi
+
+  tar -xzf "${tgz}"
+  rm -f "${tgz}" "${tgz}.sha256"
+  echo "${runner_version}" > .runner_version
+}
+
+configure_runner() {
+  local repo_url="${1}"
+  local github_token="${2}"
+  local runner_name="${3}"
+  local runner_labels_csv="${4}"
+  local workdir="${5}"
+  local ephemeral="${6}"
+
+  if [[ -f ".runner" ]]; then
+    log warn "Existing runner configuration detected; removing before re-configuring"
+    ./config.sh remove --unattended || rm -f .runner
+  fi
+
+  mkdir -p "${workdir}"
+  local cfg=(./config.sh --url "${repo_url}" --token "${github_token}" --name "${runner_name}" --labels "${runner_labels_csv}" --work "${workdir}" --unattended)
+  if [[ "${ephemeral}" == "true" ]]; then
+    cfg+=(--ephemeral)
+  fi
+
+  log info "Configuring runner '${runner_name}' (ephemeral=${ephemeral}) for ${repo_url}"
+  "${cfg[@]}"
+}
+
+cleanup_runner() {
+  if [[ "${CLEANUP_ON_STOP:-true}" != "true" ]]; then
+    log info "Cleanup on stop disabled; skipping deregistration"
+    exit 0
+  fi
+  log warn "Cleaning up runner registration"
+  ./config.sh remove --unattended || true
+  exit 0
+}
+
+start_runner() {
+  log info "Starting GitHub Actions runner service"
+  ./run.sh &
+  local pid=$!
+  wait "${pid}"
+  local code=$?
+  log warn "Runner exited with status ${code}"
+  return "${code}"
+}
+
+main() {
+  require_file "${OPTIONS_FILE}"
+
+  local repo_url
+  repo_url="$(load_option "repo_url")"
+  require_nonempty "repo_url" "${repo_url}"
+
+  local github_token
+  github_token="$(load_option "github_token")"
+  require_nonempty "github_token" "${github_token}"
+
+  local runner_name
+  runner_name="$(load_option "runner_name" "ha-runner-1")"
+
+  local runner_labels_csv
+  runner_labels_csv="$(jq -r '.runner_labels // ["ha","self-hosted"] | map(select(. != null and . != "")) | if length == 0 then ["ha","self-hosted"] else . end | join(",")' "${OPTIONS_FILE}")"
+
+  local ephemeral
+  ephemeral="$(load_option "ephemeral" "true")"
+
+  local workdir
+  workdir="$(load_option "workdir" "/data/_work")"
+
+  local cleanup_on_stop
+  cleanup_on_stop="$(load_option "cleanup_on_stop" "true")"
+
+  local configured_log_level
+  configured_log_level="$(load_option "log_level" "info")"
+  LOG_LEVEL="${configured_log_level}"
+  CURRENT_LOG_LEVEL="$(level_to_num "${LOG_LEVEL}")"
+
+  local runner_version
+  runner_version="$(load_option "runner_version" "")"
+  if [[ -z "${runner_version}" ]]; then
+    runner_version="${DEFAULT_RUNNER_VERSION}"
+  fi
+
+  export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+  export HOME="/opt/gha"
+
+  local runner_arch
+  runner_arch="$(detect_arch)"
+
+  ensure_runner_dir
+  ensure_runner_downloaded "${runner_arch}" "${runner_version}"
+
+  CLEANUP_ON_STOP="${cleanup_on_stop}"
+  trap cleanup_runner SIGINT SIGTERM
+
+  configure_runner "${repo_url}" "${github_token}" "${runner_name}" "${runner_labels_csv}" "${workdir}" "${ephemeral}"
+  unset github_token
+
+  start_runner
+}
+
+main "$@"
