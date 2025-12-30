@@ -1,4 +1,4 @@
-ARG BUILD_FROM=debian:bookworm-slim
+ARG BUILD_FROM=ghcr.io/home-assistant/amd64-base:latest
 FROM ${BUILD_FROM}
 
 ENV LANG=C.UTF-8 \
@@ -14,6 +14,11 @@ RUN set -eux; \
         apk add --no-cache \
             bash ca-certificates curl jq tar shadow su-exec \
             gcompat icu-libs icu-data-full gettext-libs krb5-libs libc6-compat libgcc libstdc++ zlib; \
+        GLIBC_VER="2.38-r1"; \
+        wget -q -O /etc/apk/keys/sgerrand.rsa.pub https://alpine-pkgs.sgerrand.com/sgerrand.rsa.pub; \
+        wget -q https://github.com/sgerrand/alpine-pkg-glibc/releases/download/${GLIBC_VER}/glibc-${GLIBC_VER}.apk; \
+        apk add --no-cache glibc-${GLIBC_VER}.apk; \
+        rm -f glibc-${GLIBC_VER}.apk; \
     else \
         echo "Unsupported base image: missing apt-get/apk" >&2; \
         exit 1; \
