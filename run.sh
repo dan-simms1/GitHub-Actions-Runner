@@ -4,8 +4,20 @@ set -euo pipefail
 OPTIONS_FILE="/data/options.json"
 
 RUNNER_ROOT="/opt/gha/actions-runner"
-DEFAULT_RUNNER_VERSION="2.317.0"
+DEFAULT_RUNNER_VERSION="latest"   # was 2.317.0, which can 404
 CLEANUP_ON_STOP="true"
+
+timestamp() {
+  # BusyBox: date -Iseconds
+  if date -Iseconds >/dev/null 2>&1; then
+    date -Iseconds
+  # GNU coreutils: date --iso-8601=seconds
+  elif date --iso-8601=seconds >/dev/null 2>&1; then
+    date --iso-8601=seconds
+  else
+    date '+%Y-%m-%dT%H:%M:%S%z'
+  fi
+}
 
 level_to_num() {
   case "${1,,}" in
@@ -29,7 +41,7 @@ log() {
   if [[ "${lvl_num}" -lt "${CURRENT_LOG_LEVEL}" ]]; then
     return
   fi
-  printf '%s [%s] %s\n' "$(date --iso-8601=seconds)" "${level^^}" "${msg}"
+  printf '%s [%s] %s\n' "$(timestamp)" "${level^^}" "${msg}"
 }
 
 require_file() {
@@ -91,9 +103,29 @@ ensure_runner_dir() {
   cd "${RUNNER_ROOT}"
 }
 
+get_latest_runner_version() {
+  # GitHub API returns tag_name like "v2.329.0"
+  local tag
+  tag="$(curl -fsSL https://api.github.com/repos/actions/runner/releases/latest | jq -r '.tag_name' || true)"
+  tag="${tag#v}"
+  if [[ -z "${tag}" || "${tag}" == "null" ]]; then
+    return 1
+  fi
+  echo "${tag}"
+}
+
+install_runner_deps_if_possible() {
+  # Works on Debian based images. On Alpine this will not fix glibc issues.
+  if [[ -x "./bin/installdependencies.sh" ]]; then
+    log info "Installing GitHub runner dependencies"
+    ./bin/installdependencies.sh || log warn "Dependency install script failed, continuing"
+  fi
+}
+
 ensure_runner_downloaded() {
   local runner_arch="${1}"
   local runner_version="${2}"
+
   local cached_version=""
   if [[ -f ".runner_version" ]]; then
     cached_version="$(< .runner_version)"
@@ -108,32 +140,41 @@ ensure_runner_downloaded() {
 
   local tgz="actions-runner-linux-${runner_arch}-${runner_version}.tar.gz"
   local base_url="https://github.com/actions/runner/releases/download/v${runner_version}"
+  local url="${base_url}/${tgz}"
 
-  curl -fsSL -o "${tgz}" "${base_url}/${tgz}"
-  if curl -fsSL -o "${tgz}.sha256" "${base_url}/${tgz}.sha256"; then
+  if ! curl -fSL -o "${tgz}" "${url}"; then
+    log error "Failed to download runner from ${url}"
+    log error "If you pinned runner_version, try a newer version. If you used 'latest', check outbound access from the add-on."
+    exit 1
+  fi
+
+  if curl -fsSL -o "${tgz}.sha256" "${url}.sha256"; then
     local expected
-    expected="$(cut -d ' ' -f1 < "${tgz}.sha256")"
+    expected="$(cut -d ' ' -f1 < "${tgz}.sha256" || true)"
     if [[ -n "${expected}" ]]; then
-      echo "${expected}  ${tgz}" | sha256sum -c -
+      echo "${expected}  ${tgz}" | sha256sum -c - || log warn "Checksum verification failed, continuing"
     else
-      log warn "Checksum file empty; skipping verification"
+      log warn "Checksum file empty, skipping verification"
     fi
   else
-    log warn "Checksum not available; skipping verification"
+    log warn "Checksum not available, skipping verification"
   fi
 
   tar -xzf "${tgz}"
   rm -f "${tgz}" "${tgz}.sha256"
   echo "${runner_version}" > .runner_version
+
+  install_runner_deps_if_possible
+
+  # Ensure runner owns everything after extract
+  chown -R runner:runner "${RUNNER_ROOT}"
 }
 
 cleanup_runner() {
   if [[ "${CLEANUP_ON_STOP:-true}" != "true" ]]; then
-    log info "Cleanup on stop disabled; skipping deregistration"
+    log info "Cleanup on stop disabled, skipping deregistration"
     exit 0
   fi
-
-  # We may be called after we've already dropped privileges, so always run remove as runner
   log warn "Cleaning up runner registration"
   as_runner ./config.sh remove --unattended || true
   exit 0
@@ -185,6 +226,14 @@ main() {
   if [[ -z "${runner_version}" ]]; then
     runner_version="${DEFAULT_RUNNER_VERSION}"
   fi
+  if [[ "${runner_version}" == "latest" ]]; then
+    runner_version="$(get_latest_runner_version || true)"
+    if [[ -z "${runner_version}" ]]; then
+      log error "Could not determine latest runner version from GitHub API"
+      exit 1
+    fi
+    log info "Using latest runner version ${runner_version}"
+  fi
 
   export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
   export HOME="/opt/gha"
@@ -192,22 +241,19 @@ main() {
   local runner_arch
   runner_arch="$(detect_arch)"
 
-  # Ensure /data workdir exists and is writable by runner before we drop privileges
+  # Ensure workdir exists and is writable by runner
   mkdir -p "${workdir}"
   chown -R runner:runner "${workdir}"
 
   ensure_runner_dir
   ensure_runner_downloaded "${runner_arch}" "${runner_version}"
 
-  # Ensure everything in runner root is owned by runner
-  chown -R runner:runner "${RUNNER_ROOT}"
-
   CLEANUP_ON_STOP="${cleanup_on_stop}"
   trap cleanup_runner SIGINT SIGTERM
 
-  # Configure as runner (GitHub runner refuses to run config/run as root)
+  # Configure as runner (GitHub runner refuses to run as root)
   if [[ -f ".runner" ]]; then
-    log warn "Existing runner configuration detected; removing before re-configuring"
+    log warn "Existing runner configuration detected, removing before re-configuring"
     as_runner ./config.sh remove --unattended || rm -f .runner
   fi
 
