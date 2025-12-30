@@ -13,7 +13,7 @@ RUN set -eux; \
     elif command -v apk >/dev/null; then \
         apk add --no-cache \
             bash ca-certificates curl jq tar shadow su-exec \
-            gcompat icu-libs krb5-libs libc6-compat libgcc libstdc++ zlib; \
+            gcompat icu-libs icu-data-full krb5-libs libc6-compat libgcc libstdc++ zlib; \
     else \
         echo "Unsupported base image: missing apt-get/apk" >&2; \
         exit 1; \

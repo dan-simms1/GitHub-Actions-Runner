@@ -192,6 +192,12 @@ start_runner_as_runner() {
   log info "Starting GitHub Actions runner service (as runner user)"
   as_runner ./run.sh &
   local pid=$!
+  sleep 2
+  if kill -0 "${pid}" 2>/dev/null; then
+    log info "Runner process is running (pid ${pid})"
+  else
+    log warn "Runner process exited immediately after launch"
+  fi
   wait "${pid}"
   local code=$?
   log warn "Runner exited with status ${code}"
@@ -245,6 +251,15 @@ main() {
 
   export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
   export HOME="/opt/gha"
+  if command -v apk >/dev/null 2>&1; then
+    if [[ -f /lib/libgcompat.so.0 ]]; then
+      export LD_PRELOAD="/lib/libgcompat.so.0${LD_PRELOAD:+:${LD_PRELOAD}}"
+      log info "Enabled gcompat preload for Alpine"
+    elif [[ -f /usr/lib/libgcompat.so.0 ]]; then
+      export LD_PRELOAD="/usr/lib/libgcompat.so.0${LD_PRELOAD:+:${LD_PRELOAD}}"
+      log info "Enabled gcompat preload for Alpine"
+    fi
+  fi
 
   local runner_arch
   runner_arch="$(detect_arch)"
