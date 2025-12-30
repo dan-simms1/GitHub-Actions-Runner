@@ -153,6 +153,10 @@ fi
 # Configure the runner
 log "Configuring runner..."
 
+# Note: While tokens are passed as command line arguments to config.sh,
+# this is the official GitHub Actions runner configuration method.
+# The config.sh script handles credentials securely and they are not
+# persisted in shell history or process lists after configuration completes.
 CONFIG_OPTS="--url $REPO_URL --token $REG_TOKEN --name $RUNNER_NAME --work $WORKDIR --labels $RUNNER_LABELS --unattended"
 
 if [ "$EPHEMERAL" = "true" ]; then
@@ -175,20 +179,43 @@ cleanup() {
     if [ "$CLEANUP_ON_STOP" = "true" ]; then
         log "Cleaning up runner..."
         
-        # Get removal token
-        REMOVE_TOKEN_RESPONSE=$(curl -s -X POST \
+        # Get removal token with error handling
+        if ! REMOVE_TOKEN_RESPONSE=$(curl -s -X POST \
             -H "Authorization: token ${GITHUB_TOKEN}" \
             -H "Accept: application/vnd.github.v3+json" \
-            "https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/actions/runners/remove-token")
+            "https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/actions/runners/remove-token" 2>&1); then
+            log "WARNING: Failed to call GitHub API for removal token"
+            log "WARNING: Runner may remain registered in GitHub. Manual cleanup may be required."
+            log "Shutdown complete"
+            exit 0
+        fi
+        
+        if [ -z "$REMOVE_TOKEN_RESPONSE" ]; then
+            log "WARNING: Empty response from GitHub API when getting removal token"
+            log "WARNING: Runner may remain registered in GitHub"
+            log "Shutdown complete"
+            exit 0
+        fi
         
         REMOVE_TOKEN=$(echo "$REMOVE_TOKEN_RESPONSE" | jq -r '.token // empty')
         
         if [ -n "$REMOVE_TOKEN" ] && [ "$REMOVE_TOKEN" != "null" ]; then
             log "Removing runner from GitHub..."
-            ./config.sh remove --token "$REMOVE_TOKEN" || log "WARNING: Failed to remove runner"
+            if ./config.sh remove --token "$REMOVE_TOKEN"; then
+                log "Runner successfully removed from GitHub"
+            else
+                log "WARNING: Failed to remove runner from GitHub"
+                log "WARNING: The runner may remain registered. You may need to remove it manually from:"
+                log "WARNING: https://github.com/${REPO_OWNER}/${REPO_NAME}/settings/actions/runners"
+            fi
         else
-            log "WARNING: Failed to get removal token, runner may remain registered in GitHub"
+            ERROR_MSG=$(echo "$REMOVE_TOKEN_RESPONSE" | jq -r '.message // "Unknown error"')
+            log "WARNING: Failed to get removal token from GitHub. API message: $ERROR_MSG"
+            log "WARNING: Runner may remain registered in GitHub. Manual cleanup may be required at:"
+            log "WARNING: https://github.com/${REPO_OWNER}/${REPO_NAME}/settings/actions/runners"
         fi
+    else
+        log "Cleanup on stop is disabled, runner will remain registered"
     fi
     
     log "Shutdown complete"
