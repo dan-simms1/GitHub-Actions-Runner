@@ -1,0 +1,31 @@
+name: GitHub Actions Runner
+version: 1.0.0
+slug: github_actions_runner
+description: Self-hosted GitHub Actions runner for Home Assistant
+url: https://github.com/dan-simms1/GitHub-Actions-Runner
+arch:
+  - aarch64
+  - armv7
+  - amd64
+  - i386
+init: false
+options:
+  repo_url: ""
+  github_token: ""
+  runner_name: "ha-runner"
+  runner_labels: "self-hosted"
+  ephemeral: false
+  workdir: "/data/work"
+  cleanup_on_stop: true
+  log_level: "info"
+  runner_version: "latest"
+schema:
+  repo_url: str
+  github_token: password
+  runner_name: str
+  runner_labels: str
+  ephemeral: bool
+  workdir: str
+  cleanup_on_stop: bool
+  log_level: list(debug|info|warning|error)
+  runner_version: str
