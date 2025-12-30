@@ -1,4 +1,4 @@
-ARG BUILD_FROM=ghcr.io/home-assistant/amd64-base:latest
+ARG BUILD_FROM=debian:bookworm-slim
 FROM ${BUILD_FROM}
 
 ENV LANG=C.UTF-8 \
@@ -8,7 +8,7 @@ RUN set -eux; \
     if command -v apt-get >/dev/null; then \
         apt-get update; \
         apt-get install -y --no-install-recommends \
-            bash ca-certificates curl jq tar gosu; \
+            bash ca-certificates curl jq tar gosu libicu72 libssl3 zlib1g libkrb5-3 libgcc-s1 libstdc++6; \
         rm -rf /var/lib/apt/lists/*; \
     elif command -v apk >/dev/null; then \
         apk add --no-cache \
