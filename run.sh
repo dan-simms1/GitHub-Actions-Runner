@@ -3,8 +3,6 @@ set -euo pipefail
 
 OPTIONS_FILE="/data/options.json"
 
-# Ensure options.json is readable by the runner user
-chmod 644 "$OPTIONS_FILE" 2>/dev/null || true
 RUNNER_ROOT="/opt/gha/actions-runner"
 DEFAULT_RUNNER_VERSION="2.317.0"
 CLEANUP_ON_STOP="true"
@@ -37,6 +35,17 @@ log() {
 require_file() {
   if [[ ! -f "${1}" ]]; then
     log error "Required file ${1} not found"
+    exit 1
+  fi
+}
+
+as_runner() {
+  if command -v su-exec >/dev/null 2>&1; then
+    su-exec runner:runner "$@"
+  elif command -v gosu >/dev/null 2>&1; then
+    gosu runner:runner "$@"
+  else
+    log error "Neither su-exec nor gosu is installed (needed to drop privileges)"
     exit 1
   fi
 }
@@ -78,6 +87,7 @@ detect_arch() {
 
 ensure_runner_dir() {
   mkdir -p "${RUNNER_ROOT}"
+  chown -R runner:runner "${RUNNER_ROOT}"
   cd "${RUNNER_ROOT}"
 }
 
@@ -117,42 +127,21 @@ ensure_runner_downloaded() {
   echo "${runner_version}" > .runner_version
 }
 
-configure_runner() {
-  local repo_url="${1}"
-  local github_token="${2}"
-  local runner_name="${3}"
-  local runner_labels_csv="${4}"
-  local workdir="${5}"
-  local ephemeral="${6}"
-
-  if [[ -f ".runner" ]]; then
-    log warn "Existing runner configuration detected; removing before re-configuring"
-    ./config.sh remove --unattended || rm -f .runner
-  fi
-
-  mkdir -p "${workdir}"
-  local cfg=(./config.sh --url "${repo_url}" --token "${github_token}" --name "${runner_name}" --labels "${runner_labels_csv}" --work "${workdir}" --unattended)
-  if [[ "${ephemeral}" == "true" ]]; then
-    cfg+=(--ephemeral)
-  fi
-
-  log info "Configuring runner '${runner_name}' (ephemeral=${ephemeral}) for ${repo_url}"
-  "${cfg[@]}"
-}
-
 cleanup_runner() {
   if [[ "${CLEANUP_ON_STOP:-true}" != "true" ]]; then
     log info "Cleanup on stop disabled; skipping deregistration"
     exit 0
   fi
+
+  # We may be called after we've already dropped privileges, so always run remove as runner
   log warn "Cleaning up runner registration"
-  ./config.sh remove --unattended || true
+  as_runner ./config.sh remove --unattended || true
   exit 0
 }
 
-start_runner() {
-  log info "Starting GitHub Actions runner service"
-  ./run.sh &
+start_runner_as_runner() {
+  log info "Starting GitHub Actions runner service (as runner user)"
+  as_runner ./run.sh &
   local pid=$!
   wait "${pid}"
   local code=$?
@@ -203,16 +192,48 @@ main() {
   local runner_arch
   runner_arch="$(detect_arch)"
 
+  # Ensure /data workdir exists and is writable by runner before we drop privileges
+  mkdir -p "${workdir}"
+  chown -R runner:runner "${workdir}"
+
   ensure_runner_dir
   ensure_runner_downloaded "${runner_arch}" "${runner_version}"
+
+  # Ensure everything in runner root is owned by runner
+  chown -R runner:runner "${RUNNER_ROOT}"
 
   CLEANUP_ON_STOP="${cleanup_on_stop}"
   trap cleanup_runner SIGINT SIGTERM
 
-  configure_runner "${repo_url}" "${github_token}" "${runner_name}" "${runner_labels_csv}" "${workdir}" "${ephemeral}"
+  # Configure as runner (GitHub runner refuses to run config/run as root)
+  if [[ -f ".runner" ]]; then
+    log warn "Existing runner configuration detected; removing before re-configuring"
+    as_runner ./config.sh remove --unattended || rm -f .runner
+  fi
+
+  log info "Configuring runner '${runner_name}' (ephemeral=${ephemeral}) for ${repo_url}"
+  if [[ "${ephemeral}" == "true" ]]; then
+    as_runner ./config.sh \
+      --url "${repo_url}" \
+      --token "${github_token}" \
+      --name "${runner_name}" \
+      --labels "${runner_labels_csv}" \
+      --work "${workdir}" \
+      --unattended \
+      --ephemeral
+  else
+    as_runner ./config.sh \
+      --url "${repo_url}" \
+      --token "${github_token}" \
+      --name "${runner_name}" \
+      --labels "${runner_labels_csv}" \
+      --work "${workdir}" \
+      --unattended
+  fi
+
   unset github_token
 
-  start_runner
+  start_runner_as_runner
 }
 
 main "$@"
