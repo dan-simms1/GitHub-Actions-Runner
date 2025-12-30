@@ -5,15 +5,15 @@ set -e
 CONFIG_PATH="/data/options.json"
 
 # Read configuration values
-REPO_URL=$(jq -r '.repo_url' $CONFIG_PATH)
-GITHUB_TOKEN=$(jq -r '.github_token' $CONFIG_PATH)
-RUNNER_NAME=$(jq -r '.runner_name' $CONFIG_PATH)
-RUNNER_LABELS=$(jq -r '.runner_labels' $CONFIG_PATH)
-EPHEMERAL=$(jq -r '.ephemeral' $CONFIG_PATH)
-WORKDIR=$(jq -r '.workdir' $CONFIG_PATH)
-CLEANUP_ON_STOP=$(jq -r '.cleanup_on_stop' $CONFIG_PATH)
-LOG_LEVEL=$(jq -r '.log_level' $CONFIG_PATH)
-RUNNER_VERSION=$(jq -r '.runner_version' $CONFIG_PATH)
+REPO_URL=$(jq -r '.repo_url' "$CONFIG_PATH")
+GITHUB_TOKEN=$(jq -r '.github_token' "$CONFIG_PATH")
+RUNNER_NAME=$(jq -r '.runner_name' "$CONFIG_PATH")
+RUNNER_LABELS=$(jq -r '.runner_labels' "$CONFIG_PATH")
+EPHEMERAL=$(jq -r '.ephemeral' "$CONFIG_PATH")
+WORKDIR=$(jq -r '.workdir' "$CONFIG_PATH")
+CLEANUP_ON_STOP=$(jq -r '.cleanup_on_stop' "$CONFIG_PATH")
+LOG_LEVEL=$(jq -r '.log_level' "$CONFIG_PATH")
+RUNNER_VERSION=$(jq -r '.runner_version' "$CONFIG_PATH")
 
 # Set log level
 case "$LOG_LEVEL" in
@@ -58,7 +58,7 @@ case "$ARCH" in
     x86_64) RUNNER_ARCH="x64" ;;
     aarch64) RUNNER_ARCH="arm64" ;;
     armv7l) RUNNER_ARCH="arm" ;;
-    i686) RUNNER_ARCH="x64" ;;
+    i686) RUNNER_ARCH="x86" ;;
     *) log "ERROR: Unsupported architecture: $ARCH"; exit 1 ;;
 esac
 
@@ -67,7 +67,19 @@ log "Architecture: $RUNNER_ARCH"
 # Determine runner version to download
 if [ "$RUNNER_VERSION" = "latest" ] || [ -z "$RUNNER_VERSION" ]; then
     log "Fetching latest runner version..."
-    RUNNER_VERSION=$(curl -s https://api.github.com/repos/actions/runner/releases/latest | jq -r '.tag_name' | sed 's/^v//')
+    if ! LATEST_VERSION_RESPONSE=$(curl -s -H "Authorization: token ${GITHUB_TOKEN}" https://api.github.com/repos/actions/runner/releases/latest); then
+        log "ERROR: Failed to fetch latest runner version from GitHub API"
+        exit 1
+    fi
+    if [ -z "$LATEST_VERSION_RESPONSE" ]; then
+        log "ERROR: Empty response from GitHub API when fetching runner version"
+        exit 1
+    fi
+    RUNNER_VERSION=$(echo "$LATEST_VERSION_RESPONSE" | jq -r '.tag_name' | sed 's/^v//')
+    if [ -z "$RUNNER_VERSION" ] || [ "$RUNNER_VERSION" = "null" ]; then
+        log "ERROR: Failed to parse runner version from GitHub API response"
+        exit 1
+    fi
 fi
 
 log "Runner version: $RUNNER_VERSION"
@@ -108,13 +120,25 @@ mkdir -p "$WORKDIR"
 
 # Get registration token from GitHub API
 log "Getting registration token from GitHub..."
-REG_TOKEN=$(curl -s -X POST \
+if ! REG_TOKEN_RESPONSE=$(curl -s -X POST \
     -H "Authorization: token ${GITHUB_TOKEN}" \
     -H "Accept: application/vnd.github.v3+json" \
-    "https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/actions/runners/registration-token" | jq -r '.token')
+    "https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/actions/runners/registration-token"); then
+    log "ERROR: Failed to call GitHub API for registration token"
+    exit 1
+fi
+
+if [ -z "$REG_TOKEN_RESPONSE" ]; then
+    log "ERROR: Empty response from GitHub API"
+    exit 1
+fi
+
+REG_TOKEN=$(echo "$REG_TOKEN_RESPONSE" | jq -r '.token')
 
 if [ -z "$REG_TOKEN" ] || [ "$REG_TOKEN" = "null" ]; then
-    log "ERROR: Failed to get registration token. Check your github_token and repo_url"
+    ERROR_MSG=$(echo "$REG_TOKEN_RESPONSE" | jq -r '.message // "Unknown error"')
+    log "ERROR: Failed to get registration token. GitHub API message: $ERROR_MSG"
+    log "ERROR: Check your github_token permissions and repo_url"
     exit 1
 fi
 
@@ -152,16 +176,18 @@ cleanup() {
         log "Cleaning up runner..."
         
         # Get removal token
-        REMOVE_TOKEN=$(curl -s -X POST \
+        REMOVE_TOKEN_RESPONSE=$(curl -s -X POST \
             -H "Authorization: token ${GITHUB_TOKEN}" \
             -H "Accept: application/vnd.github.v3+json" \
-            "https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/actions/runners/remove-token" | jq -r '.token')
+            "https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/actions/runners/remove-token")
+        
+        REMOVE_TOKEN=$(echo "$REMOVE_TOKEN_RESPONSE" | jq -r '.token // empty')
         
         if [ -n "$REMOVE_TOKEN" ] && [ "$REMOVE_TOKEN" != "null" ]; then
             log "Removing runner from GitHub..."
             ./config.sh remove --token "$REMOVE_TOKEN" || log "WARNING: Failed to remove runner"
         else
-            log "WARNING: Failed to get removal token"
+            log "WARNING: Failed to get removal token, runner may remain registered in GitHub"
         fi
     fi
     
