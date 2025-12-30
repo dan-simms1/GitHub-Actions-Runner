@@ -3,10 +3,9 @@
 Runs a GitHub self-hosted runner inside Home Assistant Supervisor by downloading the official `actions/runner` tarball pinned to a version.
 
 ## Installation
-1. Copy this repository into your Home Assistant add-ons folder (e.g. `/addon_local/github-actions-runner`).
-2. In Home Assistant, go to **Settings → Add-ons → Add-on Store → ⋮ → Repositories** and add the local path or Git URL.
-3. Install the **GitHub Actions Runner** add-on.
-4. Set the options (at minimum `repo_url` and `github_token`), then start the add-on.
+1. Add this repository to Home Assistant: **Settings → Add-ons → Add-on Store → ⋮ → Repositories → Add** and enter `https://github.com/dan-simms1/GitHub-Actions-Runner`. (Alternatively, copy this repo into `/addon_local/github-actions-runner`.)
+2. Open the **GitHub Actions Runner** add-on and press **Install**.
+3. Configure the options (at minimum `repo_url` and `github_token`), save, then start the add-on.
 
 ## Options
 - `repo_url` (required): GitHub repository URL to register the runner with.
