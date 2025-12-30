@@ -2,6 +2,9 @@
 set -euo pipefail
 
 OPTIONS_FILE="/data/options.json"
+
+# Ensure options.json is readable by the runner user
+chmod 644 "$OPTIONS_FILE" 2>/dev/null || true
 RUNNER_ROOT="/opt/gha/actions-runner"
 DEFAULT_RUNNER_VERSION="2.317.0"
 CLEANUP_ON_STOP="true"

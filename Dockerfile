@@ -34,8 +34,10 @@ RUN useradd -m -d /opt/gha -s /bin/bash runner \
 COPY run.sh /run.sh
 RUN chmod +x /run.sh
 
-USER runner
-#WORKDIR /opt/gha
+
+# Run as root to ensure access to /data/options.json
+USER root
+WORKDIR /opt/gha
 
 HEALTHCHECK --interval=60s --timeout=10s --start-period=60s CMD pgrep -f Runner\\.Listener >/dev/null || exit 1
 
