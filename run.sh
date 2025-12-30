@@ -4,6 +4,7 @@ set -euo pipefail
 OPTIONS_FILE="/data/options.json"
 RUNNER_ROOT="/opt/gha/actions-runner"
 DEFAULT_RUNNER_VERSION="2.317.0"
+CLEANUP_ON_STOP="true"
 
 level_to_num() {
   case "${1,,}" in
@@ -137,8 +138,7 @@ configure_runner() {
 }
 
 cleanup_runner() {
-  local cleanup_on_stop="${1}"
-  if [[ "${cleanup_on_stop}" != "true" ]]; then
+  if [[ "${CLEANUP_ON_STOP:-true}" != "true" ]]; then
     log info "Cleanup on stop disabled; skipping deregistration"
     exit 0
   fi
@@ -203,7 +203,8 @@ main() {
   ensure_runner_dir
   ensure_runner_downloaded "${runner_arch}" "${runner_version}"
 
-  trap 'cleanup_runner "'"${cleanup_on_stop}"'"' SIGINT SIGTERM
+  CLEANUP_ON_STOP="${cleanup_on_stop}"
+  trap cleanup_runner SIGINT SIGTERM
 
   configure_runner "${repo_url}" "${github_token}" "${runner_name}" "${runner_labels_csv}" "${workdir}" "${ephemeral}"
   unset github_token

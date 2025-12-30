@@ -24,6 +24,7 @@ Runs a GitHub self-hosted runner inside Home Assistant Supervisor by downloading
 - Downloads the official GitHub Actions runner tarball for the detected arch at startup, verifies checksum when available, and caches it.
 - Configures the runner with the provided options, registers as ephemeral when enabled, and starts the runner service. SIGINT/SIGTERM triggers deregistration when `cleanup_on_stop` is `true`.
 - Healthcheck watches for the runner process.
+- i386 images fall back to the x64 runner tarball; pure 32-bit hosts may not be supported upstream.
 
 ## Security Notes
 - Do **not** expose SSH; the container is outbound-only. Restrict any SSH access to LAN/VPN if you must enable it.

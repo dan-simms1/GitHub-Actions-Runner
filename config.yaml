@@ -35,6 +35,6 @@ schema:
   ephemeral: bool
   workdir: str
   cleanup_on_stop: bool
-  log_level: list(debug|info|warn|error)
+  log_level: list(debug|info|warn|warning|error)
   runner_version: str?
 secrets: true
