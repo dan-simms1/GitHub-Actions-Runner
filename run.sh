@@ -190,7 +190,7 @@ cleanup_runner() {
 
 start_runner_as_runner() {
   log info "Starting GitHub Actions runner service (as runner user)"
-  as_runner ./run.sh &
+  as_runner env ${RUNNER_ENV_VARS:-} ./run.sh &
   local pid=$!
   sleep 2
   if kill -0 "${pid}" 2>/dev/null; then
@@ -251,9 +251,11 @@ main() {
 
   export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
   export HOME="/opt/gha"
+  RUNNER_ENV_VARS=""
   if command -v apk >/dev/null 2>&1; then
     export DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
     log warn "Using invariant globalization on Alpine (.NET ICU dependencies not available)"
+    RUNNER_ENV_VARS="DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1"
     if [[ -f /lib/libgcompat.so.0 ]]; then
       export LD_PRELOAD="/lib/libgcompat.so.0${LD_PRELOAD:+:${LD_PRELOAD}}"
       log info "Enabled gcompat preload for Alpine"
@@ -284,7 +286,7 @@ main() {
 
   log info "Configuring runner '${runner_name}' (ephemeral=${ephemeral}) for ${repo_url}"
   if [[ "${ephemeral}" == "true" ]]; then
-    as_runner ./config.sh \
+    as_runner env ${RUNNER_ENV_VARS} ./config.sh \
       --url "${repo_url}" \
       --token "${github_token}" \
       --name "${runner_name}" \
@@ -293,7 +295,7 @@ main() {
       --unattended \
       --ephemeral
   else
-    as_runner ./config.sh \
+    as_runner env ${RUNNER_ENV_VARS} ./config.sh \
       --url "${repo_url}" \
       --token "${github_token}" \
       --name "${runner_name}" \
