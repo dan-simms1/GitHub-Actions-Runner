@@ -116,7 +116,11 @@ get_latest_runner_version() {
 
 install_runner_deps_if_possible() {
   # Works on Debian based images. Alpine uses image-provided deps instead.
-  if [[ -r /etc/os-release ]] && grep -q '^ID=alpine' /etc/os-release; then
+  if command -v apk >/dev/null 2>&1; then
+    log info "Skipping dependency install script on Alpine"
+    return
+  fi
+  if [[ -r /etc/os-release ]] && grep -qi '^ID=alpine' /etc/os-release; then
     log info "Skipping dependency install script on Alpine"
     return
   fi
@@ -152,7 +156,7 @@ ensure_runner_downloaded() {
     exit 1
   fi
 
-  if curl -fsSL -o "${tgz}.sha256" "${url}.sha256"; then
+  if curl -fsSL -o "${tgz}.sha256" "${url}.sha256" 2>/dev/null; then
     local expected
     expected="$(cut -d ' ' -f1 < "${tgz}.sha256" || true)"
     if [[ -n "${expected}" ]]; then
