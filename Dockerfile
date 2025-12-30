@@ -34,8 +34,8 @@ RUN useradd -m -d /opt/gha -s /bin/bash runner \
 COPY run.sh /run.sh
 RUN chmod +x /run.sh
 
-USER runner
-WORKDIR /opt/gha
+#USER runner
+#WORKDIR /opt/gha
 
 HEALTHCHECK --interval=60s --timeout=10s --start-period=60s CMD pgrep -f Runner\\.Listener >/dev/null || exit 1
 
