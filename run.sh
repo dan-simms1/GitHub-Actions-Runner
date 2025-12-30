@@ -115,7 +115,11 @@ get_latest_runner_version() {
 }
 
 install_runner_deps_if_possible() {
-  # Works on Debian based images. On Alpine this will not fix glibc issues.
+  # Works on Debian based images. Alpine uses image-provided deps instead.
+  if [[ -r /etc/os-release ]] && grep -q '^ID=alpine' /etc/os-release; then
+    log info "Skipping dependency install script on Alpine"
+    return
+  fi
   if [[ -x "./bin/installdependencies.sh" ]]; then
     log info "Installing GitHub runner dependencies"
     ./bin/installdependencies.sh || log warn "Dependency install script failed, continuing"

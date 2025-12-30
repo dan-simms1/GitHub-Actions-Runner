@@ -12,7 +12,8 @@ RUN set -eux; \
         rm -rf /var/lib/apt/lists/*; \
     elif command -v apk >/dev/null; then \
         apk add --no-cache \
-            bash ca-certificates curl jq tar shadow su-exec; \
+            bash ca-certificates curl jq tar shadow su-exec \
+            gcompat icu-libs krb5-libs libgcc libstdc++ zlib; \
     else \
         echo "Unsupported base image: missing apt-get/apk" >&2; \
         exit 1; \
