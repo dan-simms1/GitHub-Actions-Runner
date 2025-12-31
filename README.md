@@ -11,7 +11,7 @@ Runs a GitHub self-hosted runner inside Home Assistant Supervisor by downloading
 - `repo_url` (required): GitHub repository URL to register the runner with.
 - `runner_name` (default `ha-runner-1`): Name reported to GitHub.
 - `runner_labels` (default `["ha","self-hosted"]`): Runner labels; comma-joined when registering.
-- `github_token` (required, secret): PAT with `repo` + `workflow` scope (or `admin:org` for org runners). Prefer the narrowest scope and rotate regularly.
+- `github_token` (required, secret): Either (a) the one-time registration token from **GitHub → repo → Settings → Actions → Runners → New self-hosted runner** (or org runners: **Organization settings → Actions → Runners → New self-hosted runner**), or (b) a PAT with `repo` + `workflow` scope (org runners: `admin:org`). Prefer short-lived registration tokens when possible.
 - `ephemeral` (default `true`): Register as ephemeral so the runner auto-removes after each job.
 - `workdir` (default `/data/_work`): Working directory for jobs.
 - `cleanup_on_stop` (default `true`): Deregister the runner on stop/termination.
