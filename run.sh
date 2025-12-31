@@ -289,6 +289,8 @@ main() {
   fi
 
   log info "Configuring runner '${runner_name}' (ephemeral=${ephemeral}) for ${repo_url}"
+  log info "Ensuring no existing runner registration remains"
+  as_runner ./config.sh remove --unattended --url "${repo_url}" --token "${github_token}" || true
   if [[ "${ephemeral}" == "true" ]]; then
     as_runner ./config.sh \
       --url "${repo_url}" \
