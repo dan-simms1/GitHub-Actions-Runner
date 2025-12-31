@@ -232,6 +232,13 @@ main() {
 
   local runner_name
   runner_name="$(load_option "runner_name" "ha-runner-1")"
+  local runner_name_effective="${runner_name}"
+  if [[ "${runner_name}" == "ha-runner-1" ]]; then
+    local host_suffix
+    host_suffix="$(hostname | tr -c '[:alnum:]' '-' | cut -c1-6)"
+    runner_name_effective="${runner_name}-${host_suffix}"
+    log info "Runner name '${runner_name}' is the default; using unique name '${runner_name_effective}' to avoid conflicts"
+  fi
 
   local runner_labels_csv
   runner_labels_csv="$(jq -r '.runner_labels // ["ha","self-hosted"] | map(select(. != null and . != "")) | if length == 0 then ["ha","self-hosted"] else . end | join(",")' "${OPTIONS_FILE}")"
@@ -288,14 +295,14 @@ main() {
     as_runner ./config.sh remove --unattended || rm -f .runner
   fi
 
-  log info "Configuring runner '${runner_name}' (ephemeral=${ephemeral}) for ${repo_url}"
+  log info "Configuring runner '${runner_name_effective}' (ephemeral=${ephemeral}) for ${repo_url}"
   log info "Ensuring no existing runner registration remains"
   as_runner ./config.sh remove --unattended --url "${repo_url}" --token "${github_token}" || true
   if [[ "${ephemeral}" == "true" ]]; then
     as_runner ./config.sh \
       --url "${repo_url}" \
       --token "${github_token}" \
-      --name "${runner_name}" \
+      --name "${runner_name_effective}" \
       --labels "${runner_labels_csv}" \
       --work "${workdir}" \
       --unattended \
@@ -304,7 +311,7 @@ main() {
     as_runner ./config.sh \
       --url "${repo_url}" \
       --token "${github_token}" \
-      --name "${runner_name}" \
+      --name "${runner_name_effective}" \
       --labels "${runner_labels_csv}" \
       --work "${workdir}" \
       --unattended
