@@ -306,6 +306,7 @@ main() {
       --labels "${runner_labels_csv}" \
       --work "${workdir}" \
       --unattended \
+      --replace \
       --ephemeral
   else
     as_runner ./config.sh \
@@ -314,7 +315,8 @@ main() {
       --name "${runner_name_effective}" \
       --labels "${runner_labels_csv}" \
       --work "${workdir}" \
-      --unattended
+      --unattended \
+      --replace
   fi
 
   unset github_token
