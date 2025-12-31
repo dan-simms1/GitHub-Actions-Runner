@@ -145,6 +145,54 @@ log_system_info() {
   done
 }
 
+repo_parts_from_url() {
+  local url="${1}"
+  url="${url#https://github.com/}"
+  url="${url#http://github.com/}"
+  url="${url%.git}"
+  local owner repo
+  owner="${url%%/*}"
+  repo="${url#*/}"
+  if [[ -z "${owner}" || -z "${repo}" || "${owner}" == "${repo}" ]]; then
+    return 1
+  fi
+  echo "${owner} ${repo}"
+}
+
+remove_runner_remote_if_exists() {
+  local repo_url="${1}"
+  local token="${2}"
+  local runner_name="${3}"
+
+  local parts owner repo
+  parts="$(repo_parts_from_url "${repo_url}" || true)"
+  if [[ -z "${parts}" ]]; then
+    log warn "Could not parse owner/repo from ${repo_url}; skipping remote runner cleanup"
+    return
+  fi
+  owner="${parts%% *}"
+  repo="${parts#* }"
+
+  local list_json runner_id
+  list_json="$(curl -fsSL -H "Authorization: Bearer ${token}" \
+    -H "Accept: application/vnd.github+json" \
+    "https://api.github.com/repos/${owner}/${repo}/actions/runners?per_page=100" 2>/dev/null || true)"
+  runner_id="$(echo "${list_json}" | jq -r --arg name "${runner_name}" '.runners[]? | select(.name == $name) | .id' | head -n1)"
+  if [[ -z "${runner_id}" || "${runner_id}" == "null" ]]; then
+    log info "No existing runner named '${runner_name}' found via GitHub API"
+    return
+  fi
+  log warn "Found existing runner '${runner_name}' (id=${runner_id}) on GitHub; attempting removal"
+  if curl -fsSL -X DELETE \
+    -H "Authorization: Bearer ${token}" \
+    -H "Accept: application/vnd.github+json" \
+    "https://api.github.com/repos/${owner}/${repo}/actions/runners/${runner_id}" >/dev/null 2>&1; then
+    log info "Removed runner '${runner_name}' (id=${runner_id}) via GitHub API"
+  else
+    log warn "Failed to remove runner '${runner_name}' (id=${runner_id}) via GitHub API; continuing"
+  fi
+}
+
 ensure_runner_downloaded() {
   local runner_arch="${1}"
   local runner_version="${2}"
@@ -233,12 +281,6 @@ main() {
   local runner_name
   runner_name="$(load_option "runner_name" "ha-runner-1")"
   local runner_name_effective="${runner_name}"
-  if [[ "${runner_name}" == "ha-runner-1" ]]; then
-    local host_suffix
-    host_suffix="$(hostname | tr -c '[:alnum:]' '-' | cut -c1-6)"
-    runner_name_effective="${runner_name}-${host_suffix}"
-    log info "Runner name '${runner_name}' is the default; using unique name '${runner_name_effective}' to avoid conflicts"
-  fi
 
   local runner_labels_csv
   runner_labels_csv="$(jq -r '.runner_labels // ["ha","self-hosted"] | map(select(. != null and . != "")) | if length == 0 then ["ha","self-hosted"] else . end | join(",")' "${OPTIONS_FILE}")"
@@ -297,6 +339,7 @@ main() {
 
   log info "Configuring runner '${runner_name_effective}' (ephemeral=${ephemeral}) for ${repo_url}"
   log info "Ensuring no existing runner registration remains"
+  remove_runner_remote_if_exists "${repo_url}" "${github_token}" "${runner_name_effective}"
   as_runner ./config.sh remove --unattended --url "${repo_url}" --token "${github_token}" || true
   if [[ "${ephemeral}" == "true" ]]; then
     as_runner ./config.sh \
