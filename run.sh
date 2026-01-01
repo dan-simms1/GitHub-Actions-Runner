@@ -218,14 +218,14 @@ ensure_runner_downloaded() {
   log info "Downloading GitHub Actions runner v${runner_version} for ${runner_arch}"
   # Preserve existing credentials/config when updating the runner bits
   local preserve_tmp=""
-  if ls -A ./.runner ./.credentials ./.path ./.service ./.env >/dev/null 2>&1; then
-    preserve_tmp="$(mktemp -d)"
-    for f in .runner .credentials .path .service .env; do
-      if [[ -e "${f}" ]]; then
-        cp -a "${f}" "${preserve_tmp}/" || log warn "Failed to preserve ${f} during runner update"
+  for f in .runner .credentials .credentials_rsaparams .path .service .env; do
+    if [[ -e "${f}" ]]; then
+      if [[ -z "${preserve_tmp}" ]]; then
+        preserve_tmp="$(mktemp -d)"
       fi
-    done
-  fi
+      cp -a "${f}" "${preserve_tmp}/" || log warn "Failed to preserve ${f} during runner update"
+    fi
+  done
 
   rm -rf ./*
   if [[ -n "${preserve_tmp}" ]]; then

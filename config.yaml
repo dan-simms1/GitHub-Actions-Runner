@@ -1,5 +1,5 @@
 name: GitHub Actions Runner
-version: "1.1.4"
+version: "1.1.5"
 slug: github_actions_runner
 description: "Home Assistant add-on that runs a GitHub self-hosted Actions runner"
 url: https://github.com/dan-simms1/GitHub-Actions-Runner
