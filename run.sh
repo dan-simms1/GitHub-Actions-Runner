@@ -216,7 +216,22 @@ ensure_runner_downloaded() {
   fi
 
   log info "Downloading GitHub Actions runner v${runner_version} for ${runner_arch}"
+  # Preserve existing credentials/config when updating the runner bits
+  local preserve_tmp=""
+  if ls -A ./.runner ./.credentials ./.path ./.service ./.env >/dev/null 2>&1; then
+    preserve_tmp="$(mktemp -d)"
+    for f in .runner .credentials .path .service .env; do
+      if [[ -e "${f}" ]]; then
+        cp -a "${f}" "${preserve_tmp}/" || log warn "Failed to preserve ${f} during runner update"
+      fi
+    done
+  fi
+
   rm -rf ./*
+  if [[ -n "${preserve_tmp}" ]]; then
+    cp -a "${preserve_tmp}/." . || log warn "Failed to restore preserved runner config"
+    rm -rf "${preserve_tmp}"
+  fi
 
   local tgz="actions-runner-linux-${runner_arch}-${runner_version}.tar.gz"
   local base_url="https://github.com/actions/runner/releases/download/v${runner_version}"
