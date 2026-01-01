@@ -286,7 +286,7 @@ main() {
   runner_labels_csv="$(jq -r '.runner_labels // ["ha","self-hosted"] | map(select(. != null and . != "")) | if length == 0 then ["ha","self-hosted"] else . end | join(",")' "${OPTIONS_FILE}")"
 
   local ephemeral
-  ephemeral="$(load_option "ephemeral" "true")"
+  ephemeral="$(load_option "ephemeral" "false")"
 
   local workdir
   workdir="$(load_option "workdir" "/data/_work")"

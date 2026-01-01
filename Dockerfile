@@ -6,7 +6,7 @@ ENV LANG=C.UTF-8 \
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
-        bash ca-certificates curl jq tar gosu libicu72 libssl3 zlib1g libkrb5-3 libgcc-s1 libstdc++6; \
+        bash ca-certificates curl jq tar gosu libicu72 libssl3 zlib1g libkrb5-3 libgcc-s1 libstdc++6 openssh-client; \
     rm -rf /var/lib/apt/lists/*
 
 RUN useradd -m -d /opt/gha -s /bin/bash runner \

@@ -21,7 +21,7 @@ options:
     - ha
     - self-hosted
   github_token: ""
-  ephemeral: true
+  ephemeral: false
   workdir: "/data/_work"
   cleanup_on_stop: true
   log_level: info
