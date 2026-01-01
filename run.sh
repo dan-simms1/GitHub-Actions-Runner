@@ -3,7 +3,8 @@ set -euo pipefail
 
 OPTIONS_FILE="/data/options.json"
 
-RUNNER_ROOT="/opt/gha/actions-runner"
+RUNNER_ROOT="/data/actions-runner"
+LEGACY_RUNNER_ROOT="/opt/gha/actions-runner"
 DEFAULT_RUNNER_VERSION="latest"   # was 2.317.0, which can 404
 CLEANUP_ON_STOP="true"
 
@@ -98,6 +99,14 @@ detect_arch() {
 }
 
 ensure_runner_dir() {
+  if [[ -d "${LEGACY_RUNNER_ROOT}" && ! -e "${RUNNER_ROOT}/.runner" && ! -e "${RUNNER_ROOT}/.credentials" ]]; then
+    if [[ -n "$(ls -A "${LEGACY_RUNNER_ROOT}" 2>/dev/null)" ]]; then
+      log info "Migrating existing runner data from ${LEGACY_RUNNER_ROOT} to ${RUNNER_ROOT}"
+      mkdir -p "${RUNNER_ROOT}"
+      cp -a "${LEGACY_RUNNER_ROOT}/." "${RUNNER_ROOT}/" || log warn "Migration from legacy runner path failed, continuing with fresh setup"
+    fi
+  fi
+
   mkdir -p "${RUNNER_ROOT}"
   chown -R runner:runner "${RUNNER_ROOT}"
   cd "${RUNNER_ROOT}"
