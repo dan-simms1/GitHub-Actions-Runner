@@ -272,7 +272,15 @@ cleanup_runner() {
   fi
   log warn "Cleaning up runner registration"
   if [[ -f ".runner" ]]; then
-    as_runner ./config.sh remove --token "${RUNNER_CLEANUP_TOKEN:-}" || as_runner ./config.sh remove || true
+    if [[ -n "${RUNNER_CLEANUP_TOKEN:-}" ]]; then
+      if as_runner ./config.sh remove --token "${RUNNER_CLEANUP_TOKEN}" >/dev/null 2>&1; then
+        log info "Runner deregistered via GitHub API"
+      else
+        log warn "Runner deregistration failed; leaving local credentials in place"
+      fi
+    else
+      log warn "No cleanup token provided; skipping deregistration to preserve credentials"
+    fi
   fi
   exit 0
 }
