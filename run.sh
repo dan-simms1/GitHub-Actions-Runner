@@ -7,6 +7,7 @@ RUNNER_ROOT="/data/actions-runner"
 LEGACY_RUNNER_ROOT="/opt/gha/actions-runner"
 DEFAULT_RUNNER_VERSION="latest"   # was 2.317.0, which can 404
 CLEANUP_ON_STOP="true"
+ADDON_VERSION="1.1.7"
 
 timestamp() {
   # BusyBox: date -Iseconds
@@ -331,6 +332,7 @@ main() {
   configured_log_level="$(load_option "log_level" "info")"
   LOG_LEVEL="${configured_log_level}"
   CURRENT_LOG_LEVEL="$(level_to_num "${LOG_LEVEL}")"
+  log info "Add-on version ${ADDON_VERSION}"
 
   local runner_version
   runner_version="$(load_option "runner_version" "")"
