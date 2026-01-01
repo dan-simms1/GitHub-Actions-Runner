@@ -247,7 +247,9 @@ cleanup_runner() {
     exit 0
   fi
   log warn "Cleaning up runner registration"
-  as_runner ./config.sh remove --unattended || true
+  if [[ -f ".runner" ]]; then
+    as_runner ./config.sh remove --token "${RUNNER_CLEANUP_TOKEN:-}" || as_runner ./config.sh remove || true
+  fi
   exit 0
 }
 
@@ -275,8 +277,7 @@ main() {
   require_nonempty "repo_url" "${repo_url}"
 
   local github_token
-  github_token="$(load_option "github_token")"
-  require_nonempty "github_token" "${github_token}"
+  github_token="$(load_option "github_token" "")"
 
   local runner_name
   runner_name="$(load_option "runner_name" "ha-runner-1")"
@@ -329,37 +330,52 @@ main() {
   ensure_runner_downloaded "${runner_arch}" "${runner_version}"
 
   CLEANUP_ON_STOP="${cleanup_on_stop}"
+  export RUNNER_CLEANUP_TOKEN="${github_token}"
   trap cleanup_runner SIGINT SIGTERM
 
   # Configure as runner (GitHub runner refuses to run as root)
-  if [[ -f ".runner" ]]; then
-    log warn "Existing runner configuration detected, removing before re-configuring"
-    as_runner ./config.sh remove --unattended || rm -f .runner
-  fi
-
-  log info "Configuring runner '${runner_name_effective}' (ephemeral=${ephemeral}) for ${repo_url}"
-  log info "Ensuring no existing runner registration remains"
-  remove_runner_remote_if_exists "${repo_url}" "${github_token}" "${runner_name_effective}"
-  as_runner ./config.sh remove --unattended --url "${repo_url}" --token "${github_token}" || true
-  if [[ "${ephemeral}" == "true" ]]; then
-    as_runner ./config.sh \
-      --url "${repo_url}" \
-      --token "${github_token}" \
-      --name "${runner_name_effective}" \
-      --labels "${runner_labels_csv}" \
-      --work "${workdir}" \
-      --unattended \
-      --replace \
-      --ephemeral
+  # Only register if no valid config exists or if explicitly forced
+  if [[ -f ".runner" && -f ".credentials" ]]; then
+    log info "Existing runner configuration found, will attempt to reconnect"
+    log info "If reconnection fails, provide a new github_token to re-register"
   else
-    as_runner ./config.sh \
-      --url "${repo_url}" \
-      --token "${github_token}" \
-      --name "${runner_name_effective}" \
-      --labels "${runner_labels_csv}" \
-      --work "${workdir}" \
-      --unattended \
-      --replace
+    if [[ -z "${github_token}" ]]; then
+      log error "No runner configuration exists and github_token is not provided"
+      log error "Provide a github_token to register the runner for the first time"
+      exit 1
+    fi
+    
+    log info "Registering new runner '${runner_name_effective}' (ephemeral=${ephemeral}) for ${repo_url}"
+    
+    # Clean up any stale config files
+    if [[ -f ".runner" ]]; then
+      log warn "Removing stale .runner file"
+      rm -f .runner .credentials
+    fi
+    
+    # Remove any existing runner with same name via API
+    remove_runner_remote_if_exists "${repo_url}" "${github_token}" "${runner_name_effective}"
+    
+    if [[ "${ephemeral}" == "true" ]]; then
+      as_runner ./config.sh \
+        --url "${repo_url}" \
+        --token "${github_token}" \
+        --name "${runner_name_effective}" \
+        --labels "${runner_labels_csv}" \
+        --work "${workdir}" \
+        --unattended \
+        --replace \
+        --ephemeral
+    else
+      as_runner ./config.sh \
+        --url "${repo_url}" \
+        --token "${github_token}" \
+        --name "${runner_name_effective}" \
+        --labels "${runner_labels_csv}" \
+        --work "${workdir}" \
+        --unattended \
+        --replace
+    fi
   fi
 
   unset github_token

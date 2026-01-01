@@ -11,19 +11,27 @@ Runs a GitHub self-hosted runner inside Home Assistant Supervisor by downloading
 - `repo_url` (required): GitHub repository URL to register the runner with.
 - `runner_name` (default `ha-runner-1`): Name reported to GitHub.
 - `runner_labels` (default `["ha","self-hosted"]`): Runner labels; comma-joined when registering.
-- `github_token` (required, secret): Either (a) the one-time registration token from **GitHub → repo → Settings → Actions → Runners → New self-hosted runner** (or org runners: **Organization settings → Actions → Runners → New self-hosted runner**), or (b) a PAT with `repo` + `workflow` scope (org runners: `admin:org`). Prefer short-lived registration tokens when possible.
-- `ephemeral` (default `true`): Register as ephemeral so the runner auto-removes after each job.
+- `github_token` (optional for restarts, secret): Registration token from **GitHub → repo → Settings → Actions → Runners → New self-hosted runner**. Only required for initial registration or re-registration. Once registered, the runner can restart without a new token.
+- `ephemeral` (default `false`): Register as ephemeral so the runner auto-removes after each job. Set to `true` if you want single-use runners.
 - `workdir` (default `/data/_work`): Working directory for jobs.
 - `cleanup_on_stop` (default `true`): Deregister the runner on stop/termination.
 - `log_level` (default `info`): `debug`, `info`, `warn`, or `error`.
-- `runner_version` (optional): Specific Actions runner version; defaults to a pinned version in `run.sh`.
+- `runner_version` (optional): Specific Actions runner version; defaults to `latest`.
 
 ## Behavior
-- Uses Home Assistant base images per architecture (`aarch64`, `armv7`, `amd64`, `i386`).
+- Uses Debian base image with necessary dependencies including OpenSSH client.
 - Downloads the official GitHub Actions runner tarball for the detected arch at startup, verifies checksum when available, and caches it.
-- Configures the runner with the provided options, registers as ephemeral when enabled, and starts the runner service. SIGINT/SIGTERM triggers deregistration when `cleanup_on_stop` is `true`.
-- Healthcheck watches for the runner process.
+- **Initial Setup**: Requires `github_token` to register the runner. Get a registration token from **GitHub → Settings → Actions → Runners → New runner**.
+- **Restarts**: After initial registration, the runner preserves its credentials and can restart without requiring a new token. Simply restart the add-on and it will reconnect automatically.
+- **Re-registration**: If you need to re-register (e.g., after removing runner on GitHub), provide a fresh `github_token` and the runner will detect the missing credentials and re-register.
+- Configures the runner with the provided options. SIGINT/SIGTERM triggers deregistration when `cleanup_on_stop` is `true`.
 - i386 images fall back to the x64 runner tarball; pure 32-bit hosts may not be supported upstream.
+
+## Restart-Friendly Design
+This add-on is designed to restart without requiring new tokens:
+1. **First run**: Provide `github_token` to register
+2. **Subsequent restarts**: Remove or leave `github_token` empty - runner reconnects automatically
+3. **Token expiry**: Registration tokens expire after 1 hour, but once registered, the runner maintains its own credentials
 
 ## Security Notes
 - Do **not** expose SSH; the container is outbound-only. Restrict any SSH access to LAN/VPN if you must enable it.
