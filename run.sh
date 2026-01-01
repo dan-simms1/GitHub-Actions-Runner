@@ -7,7 +7,7 @@ RUNNER_ROOT="/data/actions-runner"
 LEGACY_RUNNER_ROOT="/opt/gha/actions-runner"
 DEFAULT_RUNNER_VERSION="latest"   # was 2.317.0, which can 404
 CLEANUP_ON_STOP="true"
-ADDON_VERSION="1.1.17"
+ADDON_VERSION="1.1.18"
 
 timestamp() {
   # BusyBox: date -Iseconds
@@ -368,7 +368,13 @@ main() {
   trap cleanup_runner SIGINT SIGTERM
 
   # Configure as runner (GitHub runner refuses to run as root)
-  # Only register if no valid config exists or if explicitly forced
+  # If config exists but github_token is provided, re-register to replace stale/removed registrations
+  if [[ -f ".runner" && -f ".credentials" && -n "${github_token}" ]]; then
+    log warn "Existing runner config found; re-registering with provided github_token"
+    remove_runner_remote_if_exists "${repo_url}" "${github_token}" "${runner_name_effective}"
+    rm -f .runner .credentials .credentials_rsaparams .env .path .service
+  fi
+
   if [[ -f ".runner" && -f ".credentials" ]]; then
     log info "Existing runner configuration found, will attempt to reconnect"
     log info "If reconnection fails, provide a new github_token to re-register"
