@@ -7,7 +7,7 @@ RUNNER_ROOT="/data/actions-runner"
 LEGACY_RUNNER_ROOT="/opt/gha/actions-runner"
 DEFAULT_RUNNER_VERSION="latest"   # was 2.317.0, which can 404
 CLEANUP_ON_STOP="true"
-ADDON_VERSION="1.1.19"
+ADDON_VERSION="1.1.20"
 
 timestamp() {
   # BusyBox: date -Iseconds
@@ -428,6 +428,14 @@ main() {
     if [[ "${has_partial_config}" == "true" ]]; then
       log warn "Removing stale runner configuration files"
     fi
+
+    if [[ -n "${github_token}" ]]; then
+      log info "Ensuring prior runner registration is removed (best-effort)"
+      if ! as_runner ./config.sh remove --token "${github_token}" >/dev/null 2>&1; then
+        log warn "config.sh remove failed; continuing with fresh registration"
+      fi
+    fi
+
     clear_local_runner_config
     
     # Remove any existing runner with same name via API
