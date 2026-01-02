@@ -7,7 +7,7 @@ RUNNER_ROOT="/data/actions-runner"
 LEGACY_RUNNER_ROOT="/opt/gha/actions-runner"
 DEFAULT_RUNNER_VERSION="latest"   # was 2.317.0, which can 404
 CLEANUP_ON_STOP="true"
-ADDON_VERSION="1.1.18"
+ADDON_VERSION="1.1.19"
 
 timestamp() {
   # BusyBox: date -Iseconds
@@ -266,6 +266,19 @@ ensure_runner_downloaded() {
   chown -R runner:runner "${RUNNER_ROOT}"
 }
 
+clear_local_runner_config() {
+  local removed="false"
+  for f in .runner .credentials .credentials_rsaparams .env .path .service .settings; do
+    if [[ -e "${f}" ]]; then
+      removed="true"
+      rm -f "${f}" || log warn "Failed to remove ${f}"
+    fi
+  done
+  if [[ "${removed}" == "true" ]]; then
+    log info "Removed local runner configuration files"
+  fi
+}
+
 cleanup_runner() {
   if [[ "${CLEANUP_ON_STOP:-true}" != "true" ]]; then
     log info "Cleanup on stop disabled, skipping deregistration"
@@ -369,16 +382,40 @@ main() {
 
   # Configure as runner (GitHub runner refuses to run as root)
   # If config exists but github_token is provided, re-register to replace stale/removed registrations
-  if [[ -f ".runner" && -f ".credentials" && -n "${github_token}" ]]; then
-    log warn "Existing runner config found; re-registering with provided github_token"
-    remove_runner_remote_if_exists "${repo_url}" "${github_token}" "${runner_name_effective}"
-    rm -f .runner .credentials .credentials_rsaparams .env .path .service
+  local has_runner_config="false"
+  if [[ -e ".runner" || -e ".credentials" ]]; then
+    has_runner_config="true"
   fi
 
-  if [[ -f ".runner" && -f ".credentials" ]]; then
+  local has_partial_config="false"
+  for f in .runner .credentials .credentials_rsaparams .env .path .service .settings; do
+    if [[ -e "${f}" ]]; then
+      has_partial_config="true"
+      break
+    fi
+  done
+
+  local remote_runner_removed="false"
+
+  if [[ "${has_runner_config}" == "true" && -n "${github_token}" ]]; then
+    log warn "Existing runner config found; re-registering with provided github_token"
+    remove_runner_remote_if_exists "${repo_url}" "${github_token}" "${runner_name_effective}"
+    remote_runner_removed="true"
+    clear_local_runner_config
+    has_runner_config="false"
+    has_partial_config="false"
+  fi
+
+  if [[ "${has_runner_config}" == "true" ]]; then
     log info "Existing runner configuration found, will attempt to reconnect"
     log info "If reconnection fails, provide a new github_token to re-register"
   else
+    if [[ "${has_partial_config}" == "true" ]]; then
+      log warn "Found partial runner configuration; cleaning up before registration"
+      clear_local_runner_config
+      has_partial_config="false"
+    fi
+
     if [[ -z "${github_token}" ]]; then
       log error "No runner configuration exists and github_token is not provided"
       log error "Provide a github_token to register the runner for the first time"
@@ -387,14 +424,17 @@ main() {
     
     log info "Registering new runner '${runner_name_effective}' (ephemeral=${ephemeral}) for ${repo_url}"
     
-    # Clean up any stale config files
-    if [[ -f ".runner" ]]; then
-      log warn "Removing stale .runner file"
-      rm -f .runner .credentials
+    # Clean up any stale config files (always clear before registering)
+    if [[ "${has_partial_config}" == "true" ]]; then
+      log warn "Removing stale runner configuration files"
     fi
+    clear_local_runner_config
     
     # Remove any existing runner with same name via API
-    remove_runner_remote_if_exists "${repo_url}" "${github_token}" "${runner_name_effective}"
+    if [[ "${remote_runner_removed}" != "true" ]]; then
+      remove_runner_remote_if_exists "${repo_url}" "${github_token}" "${runner_name_effective}"
+      remote_runner_removed="true"
+    fi
     
     if [[ "${ephemeral}" == "true" ]]; then
       as_runner ./config.sh \
