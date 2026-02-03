@@ -17,6 +17,9 @@ Runs a GitHub self-hosted runner inside Home Assistant Supervisor by downloading
 - `force_reregister` (default `false`): Force re-registration on startup using a registration token or PAT.
 - `log_level` (default `info`): `debug`, `info`, `warn`, or `error`.
 - `runner_version` (optional): Specific Actions runner version; defaults to `latest`.
+  
+## Migration Notes
+- `cleanup_on_stop` has been removed. If it exists in your add-on config, delete it. The runner now keeps its registration on stop for reliable reconnects.
 
 ## Behavior
 - Uses Debian base image with necessary dependencies including OpenSSH client.
