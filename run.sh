@@ -6,8 +6,7 @@ OPTIONS_FILE="/data/options.json"
 RUNNER_ROOT="/data/actions-runner"
 LEGACY_RUNNER_ROOT="/opt/gha/actions-runner"
 DEFAULT_RUNNER_VERSION="latest"   # was 2.317.0, which can 404
-CLEANUP_ON_STOP="true"
-ADDON_VERSION="1.1.23"
+ADDON_VERSION="1.1.25"
 RUNNER_PID=""
 
 timestamp() {
@@ -339,12 +338,8 @@ clear_local_runner_config() {
   fi
 }
 
-cleanup_runner() {
-  if [[ "${CLEANUP_ON_STOP:-true}" != "true" ]]; then
-    log info "Cleanup on stop disabled, skipping deregistration"
-    exit 0
-  fi
-  log warn "Cleaning up runner registration"
+shutdown_runner() {
+  log warn "Stopping runner"
   if [[ -n "${RUNNER_PID}" ]]; then
     if kill -0 "${RUNNER_PID}" 2>/dev/null; then
       log info "Stopping runner process (pid ${RUNNER_PID})"
@@ -359,20 +354,6 @@ cleanup_runner() {
         sleep 1
         waited=$((waited + 1))
       done
-    fi
-  fi
-  if [[ -f ".runner" ]]; then
-    if [[ -n "${RUNNER_CLEANUP_TOKEN:-}" ]]; then
-      if as_runner ./config.sh remove --token "${RUNNER_CLEANUP_TOKEN}" >/dev/null 2>&1; then
-        log info "Runner deregistered via GitHub API"
-      else
-        log warn "Runner deregistration failed; leaving local credentials in place"
-      fi
-    elif [[ -n "${RUNNER_CLEANUP_PAT:-}" && -n "${RUNNER_REPO_URL:-}" && -n "${RUNNER_NAME:-}" ]]; then
-      log warn "No removal token available; attempting runner removal via API"
-      remove_runner_remote_if_exists "${RUNNER_REPO_URL}" "${RUNNER_CLEANUP_PAT}" "${RUNNER_NAME}"
-    else
-      log warn "No cleanup token provided; skipping deregistration to preserve credentials"
     fi
   fi
   exit 0
@@ -421,9 +402,6 @@ main() {
 
   local workdir
   workdir="$(load_option "workdir" "/data/_work")"
-
-  local cleanup_on_stop
-  cleanup_on_stop="$(load_option "cleanup_on_stop" "true")"
 
   local force_reregister
   force_reregister="$(load_option "force_reregister" "false")"
@@ -485,12 +463,7 @@ main() {
   ensure_runner_dir
   ensure_runner_downloaded "${runner_arch}" "${runner_version}"
 
-  CLEANUP_ON_STOP="${cleanup_on_stop}"
-  export RUNNER_CLEANUP_TOKEN="${removal_token}"
-  export RUNNER_CLEANUP_PAT="${github_pat}"
-  export RUNNER_REPO_URL="${repo_url}"
-  export RUNNER_NAME="${runner_name_effective}"
-  trap cleanup_runner SIGINT SIGTERM
+  trap shutdown_runner SIGINT SIGTERM
 
   # Configure as runner (GitHub runner refuses to run as root)
   # If config exists but github_token is provided, re-register to replace stale/removed registrations

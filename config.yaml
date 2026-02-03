@@ -1,5 +1,5 @@
 name: GitHub Actions Runner
-version: "1.1.23"
+version: "1.1.25"
 slug: github_actions_runner
 description: "Home Assistant add-on that runs a GitHub self-hosted Actions runner"
 url: https://github.com/dan-simms1/GitHub-Actions-Runner
@@ -23,7 +23,6 @@ options:
   github_token: ""
   ephemeral: false
   workdir: "/data/_work"
-  cleanup_on_stop: true
   force_reregister: false
   log_level: info
   runner_version: ""
@@ -35,7 +34,6 @@ schema:
   github_token: password?
   ephemeral: bool
   workdir: str
-  cleanup_on_stop: bool
   force_reregister: bool
   log_level: list(debug|info|warn|warning|error)
   runner_version: str?
