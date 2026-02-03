@@ -7,7 +7,7 @@ RUNNER_ROOT="/data/actions-runner"
 LEGACY_RUNNER_ROOT="/opt/gha/actions-runner"
 DEFAULT_RUNNER_VERSION="latest"   # was 2.317.0, which can 404
 CLEANUP_ON_STOP="true"
-ADDON_VERSION="1.1.20"
+ADDON_VERSION="1.1.21"
 
 timestamp() {
   # BusyBox: date -Iseconds
@@ -157,8 +157,11 @@ log_system_info() {
 
 repo_parts_from_url() {
   local url="${1}"
-  url="${url#https://github.com/}"
-  url="${url#http://github.com/}"
+  url="${url#https://}"
+  url="${url#http://}"
+  if [[ "${url}" == */*/* ]]; then
+    url="${url#*/}"
+  fi
   url="${url%.git}"
   local owner repo
   owner="${url%%/*}"
@@ -167,6 +170,62 @@ repo_parts_from_url() {
     return 1
   fi
   echo "${owner} ${repo}"
+}
+
+is_probably_pat() {
+  case "${1}" in
+    ghp_*|gho_*|ghu_*|ghs_*|ghr_*|github_pat_*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+github_api_base_from_url() {
+  local url="${1}"
+  local host
+  host="${url#https://}"
+  host="${host#http://}"
+  host="${host%%/*}"
+  if [[ -z "${host}" || "${host}" == "github.com" ]]; then
+    echo "https://api.github.com"
+  else
+    echo "https://${host}/api/v3"
+  fi
+}
+
+get_registration_token_from_pat() {
+  local repo_url="${1}"
+  local pat="${2}"
+  local parts owner repo api_base
+  parts="$(repo_parts_from_url "${repo_url}" || true)"
+  if [[ -z "${parts}" ]]; then
+    return 1
+  fi
+  owner="${parts%% *}"
+  repo="${parts#* }"
+  api_base="$(github_api_base_from_url "${repo_url}")"
+  curl -fsSL -X POST \
+    -H "Authorization: Bearer ${pat}" \
+    -H "Accept: application/vnd.github+json" \
+    "${api_base}/repos/${owner}/${repo}/actions/runners/registration-token" \
+    | jq -r '.token'
+}
+
+get_removal_token_from_pat() {
+  local repo_url="${1}"
+  local pat="${2}"
+  local parts owner repo api_base
+  parts="$(repo_parts_from_url "${repo_url}" || true)"
+  if [[ -z "${parts}" ]]; then
+    return 1
+  fi
+  owner="${parts%% *}"
+  repo="${parts#* }"
+  api_base="$(github_api_base_from_url "${repo_url}")"
+  curl -fsSL -X POST \
+    -H "Authorization: Bearer ${pat}" \
+    -H "Accept: application/vnd.github+json" \
+    "${api_base}/repos/${owner}/${repo}/actions/runners/remove-token" \
+    | jq -r '.token'
 }
 
 remove_runner_remote_if_exists() {
@@ -186,7 +245,7 @@ remove_runner_remote_if_exists() {
   local list_json runner_id
   list_json="$(curl -fsSL -H "Authorization: Bearer ${token}" \
     -H "Accept: application/vnd.github+json" \
-    "https://api.github.com/repos/${owner}/${repo}/actions/runners?per_page=100" 2>/dev/null || true)"
+    "$(github_api_base_from_url "${repo_url}")/repos/${owner}/${repo}/actions/runners?per_page=100" 2>/dev/null || true)"
   runner_id="$(echo "${list_json}" | jq -r --arg name "${runner_name}" '.runners[]? | select(.name == $name) | .id' | head -n1)"
   if [[ -z "${runner_id}" || "${runner_id}" == "null" ]]; then
     log info "No existing runner named '${runner_name}' found via GitHub API"
@@ -196,7 +255,7 @@ remove_runner_remote_if_exists() {
   if curl -fsSL -X DELETE \
     -H "Authorization: Bearer ${token}" \
     -H "Accept: application/vnd.github+json" \
-    "https://api.github.com/repos/${owner}/${repo}/actions/runners/${runner_id}" >/dev/null 2>&1; then
+    "$(github_api_base_from_url "${repo_url}")/repos/${owner}/${repo}/actions/runners/${runner_id}" >/dev/null 2>&1; then
     log info "Removed runner '${runner_name}' (id=${runner_id}) via GitHub API"
   else
     log warn "Failed to remove runner '${runner_name}' (id=${runner_id}) via GitHub API; continuing"
@@ -292,6 +351,9 @@ cleanup_runner() {
       else
         log warn "Runner deregistration failed; leaving local credentials in place"
       fi
+    elif [[ -n "${RUNNER_CLEANUP_PAT:-}" && -n "${RUNNER_REPO_URL:-}" && -n "${RUNNER_NAME:-}" ]]; then
+      log warn "No removal token available; attempting runner removal via API"
+      remove_runner_remote_if_exists "${RUNNER_REPO_URL}" "${RUNNER_CLEANUP_PAT}" "${RUNNER_NAME}"
     else
       log warn "No cleanup token provided; skipping deregistration to preserve credentials"
     fi
@@ -324,6 +386,9 @@ main() {
 
   local github_token
   github_token="$(load_option "github_token" "")"
+  local github_pat=""
+  local registration_token=""
+  local removal_token=""
 
   local runner_name
   runner_name="$(load_option "runner_name" "ha-runner-1")"
@@ -369,6 +434,28 @@ main() {
 
   log_system_info
 
+  if [[ -n "${github_token}" ]]; then
+    if is_probably_pat "${github_token}"; then
+      github_pat="${github_token}"
+      registration_token="$(get_registration_token_from_pat "${repo_url}" "${github_pat}" || true)"
+      if [[ -n "${registration_token}" && "${registration_token}" != "null" ]]; then
+        log info "Obtained runner registration token from GitHub API"
+      else
+        registration_token=""
+        log warn "Failed to obtain runner registration token from GitHub API; check PAT scopes"
+      fi
+
+      removal_token="$(get_removal_token_from_pat "${repo_url}" "${github_pat}" || true)"
+      if [[ -n "${removal_token}" && "${removal_token}" != "null" ]]; then
+        log info "Obtained runner removal token from GitHub API"
+      else
+        removal_token=""
+      fi
+    else
+      registration_token="${github_token}"
+    fi
+  fi
+
   # Ensure workdir exists and is writable by runner
   mkdir -p "${workdir}"
   chown -R runner:runner "${workdir}"
@@ -377,7 +464,10 @@ main() {
   ensure_runner_downloaded "${runner_arch}" "${runner_version}"
 
   CLEANUP_ON_STOP="${cleanup_on_stop}"
-  export RUNNER_CLEANUP_TOKEN="${github_token}"
+  export RUNNER_CLEANUP_TOKEN="${removal_token}"
+  export RUNNER_CLEANUP_PAT="${github_pat}"
+  export RUNNER_REPO_URL="${repo_url}"
+  export RUNNER_NAME="${runner_name_effective}"
   trap cleanup_runner SIGINT SIGTERM
 
   # Configure as runner (GitHub runner refuses to run as root)
@@ -397,28 +487,30 @@ main() {
 
   local remote_runner_removed="false"
 
-  if [[ "${has_runner_config}" == "true" && -n "${github_token}" ]]; then
-    log warn "Existing runner config found; re-registering with provided github_token"
-    remove_runner_remote_if_exists "${repo_url}" "${github_token}" "${runner_name_effective}"
-    remote_runner_removed="true"
-    clear_local_runner_config
-    has_runner_config="false"
-    has_partial_config="false"
+  if [[ "${has_runner_config}" == "true" ]]; then
+    if [[ -n "${github_pat}" && -n "${registration_token}" ]]; then
+      log warn "Existing runner config found; re-registering with provided PAT"
+      remove_runner_remote_if_exists "${repo_url}" "${github_pat}" "${runner_name_effective}"
+      remote_runner_removed="true"
+      clear_local_runner_config
+      has_runner_config="false"
+      has_partial_config="false"
+    else
+      log info "Existing runner configuration found, will attempt to reconnect"
+      log info "If reconnection fails, remove local config or provide a PAT to re-register"
+    fi
   fi
 
-  if [[ "${has_runner_config}" == "true" ]]; then
-    log info "Existing runner configuration found, will attempt to reconnect"
-    log info "If reconnection fails, provide a new github_token to re-register"
-  else
+  if [[ "${has_runner_config}" != "true" ]]; then
     if [[ "${has_partial_config}" == "true" ]]; then
       log warn "Found partial runner configuration; cleaning up before registration"
       clear_local_runner_config
       has_partial_config="false"
     fi
 
-    if [[ -z "${github_token}" ]]; then
-      log error "No runner configuration exists and github_token is not provided"
-      log error "Provide a github_token to register the runner for the first time"
+    if [[ -z "${registration_token}" ]]; then
+      log error "No runner configuration exists and no registration token is available"
+      log error "Provide a registration token, or a PAT with repo/administration scopes to request one"
       exit 1
     fi
     
@@ -429,9 +521,9 @@ main() {
       log warn "Removing stale runner configuration files"
     fi
 
-    if [[ -n "${github_token}" ]]; then
+    if [[ -n "${removal_token}" ]]; then
       log info "Ensuring prior runner registration is removed (best-effort)"
-      if ! as_runner ./config.sh remove --token "${github_token}" >/dev/null 2>&1; then
+      if ! as_runner ./config.sh remove --token "${removal_token}" >/dev/null 2>&1; then
         log warn "config.sh remove failed; continuing with fresh registration"
       fi
     fi
@@ -439,15 +531,15 @@ main() {
     clear_local_runner_config
     
     # Remove any existing runner with same name via API
-    if [[ "${remote_runner_removed}" != "true" ]]; then
-      remove_runner_remote_if_exists "${repo_url}" "${github_token}" "${runner_name_effective}"
+    if [[ "${remote_runner_removed}" != "true" && -n "${github_pat}" ]]; then
+      remove_runner_remote_if_exists "${repo_url}" "${github_pat}" "${runner_name_effective}"
       remote_runner_removed="true"
     fi
     
     if [[ "${ephemeral}" == "true" ]]; then
       as_runner ./config.sh \
         --url "${repo_url}" \
-        --token "${github_token}" \
+        --token "${registration_token}" \
         --name "${runner_name_effective}" \
         --labels "${runner_labels_csv}" \
         --work "${workdir}" \
@@ -457,7 +549,7 @@ main() {
     else
       as_runner ./config.sh \
         --url "${repo_url}" \
-        --token "${github_token}" \
+        --token "${registration_token}" \
         --name "${runner_name_effective}" \
         --labels "${runner_labels_csv}" \
         --work "${workdir}" \
@@ -467,6 +559,9 @@ main() {
   fi
 
   unset github_token
+  unset registration_token
+  unset github_pat
+  unset removal_token
 
   start_runner_as_runner
 }
