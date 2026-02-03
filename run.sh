@@ -7,7 +7,7 @@ RUNNER_ROOT="/data/actions-runner"
 LEGACY_RUNNER_ROOT="/opt/gha/actions-runner"
 DEFAULT_RUNNER_VERSION="latest"   # was 2.317.0, which can 404
 CLEANUP_ON_STOP="true"
-ADDON_VERSION="1.1.22"
+ADDON_VERSION="1.1.23"
 RUNNER_PID=""
 
 timestamp() {
@@ -425,6 +425,9 @@ main() {
   local cleanup_on_stop
   cleanup_on_stop="$(load_option "cleanup_on_stop" "true")"
 
+  local force_reregister
+  force_reregister="$(load_option "force_reregister" "false")"
+
   local configured_log_level
   configured_log_level="$(load_option "log_level" "info")"
   LOG_LEVEL="${configured_log_level}"
@@ -507,16 +510,23 @@ main() {
   local remote_runner_removed="false"
 
   if [[ "${has_runner_config}" == "true" ]]; then
-    if [[ -n "${github_pat}" && -n "${registration_token}" ]]; then
-      log warn "Existing runner config found; re-registering with provided PAT"
-      remove_runner_remote_if_exists "${repo_url}" "${github_pat}" "${runner_name_effective}"
-      remote_runner_removed="true"
+    if [[ "${force_reregister}" == "true" ]]; then
+      if [[ -z "${registration_token}" ]]; then
+        log error "force_reregister is true but no registration token is available"
+        log error "Provide a registration token, or a PAT with repo/administration scopes to request one"
+        exit 1
+      fi
+      log warn "force_reregister enabled; re-registering runner"
+      if [[ -n "${github_pat}" ]]; then
+        remove_runner_remote_if_exists "${repo_url}" "${github_pat}" "${runner_name_effective}"
+        remote_runner_removed="true"
+      fi
       clear_local_runner_config
       has_runner_config="false"
       has_partial_config="false"
     else
       log info "Existing runner configuration found, will attempt to reconnect"
-      log info "If reconnection fails, remove local config or provide a PAT to re-register"
+      log info "Set force_reregister=true to re-register with a new token"
     fi
   fi
 

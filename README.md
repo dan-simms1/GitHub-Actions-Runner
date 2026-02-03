@@ -15,6 +15,7 @@ Runs a GitHub self-hosted runner inside Home Assistant Supervisor by downloading
 - `ephemeral` (default `false`): Register as ephemeral so the runner auto-removes after each job. Set to `true` if you want single-use runners.
 - `workdir` (default `/data/_work`): Working directory for jobs.
 - `cleanup_on_stop` (default `true`): Deregister the runner on stop/termination.
+- `force_reregister` (default `false`): Force re-registration on startup using a registration token or PAT.
 - `log_level` (default `info`): `debug`, `info`, `warn`, or `error`.
 - `runner_version` (optional): Specific Actions runner version; defaults to `latest`.
 
@@ -22,7 +23,7 @@ Runs a GitHub self-hosted runner inside Home Assistant Supervisor by downloading
 - Uses Debian base image with necessary dependencies including OpenSSH client.
 - Downloads the official GitHub Actions runner tarball for the detected arch at startup, verifies checksum when available, and caches it.
 - **Initial Setup**: Requires `github_token` to register the runner. Use a registration token from **GitHub → Settings → Actions → Runners → New runner**, or a PAT to auto-request one.
-- **Restarts**: After initial registration, the runner preserves its credentials and can restart without requiring a new token. Simply restart the add-on and it will reconnect automatically.
+- **Restarts**: After initial registration, the runner preserves its credentials and can restart without requiring a new token. Set `cleanup_on_stop: false` so the runner can reconnect between restarts.
 - **Re-registration**: If you need to re-register (e.g., after removing runner on GitHub), provide a PAT or a fresh registration token and the runner will re-register.
 - **Token handling**: If a registration token is present but a valid local config already exists, the add-on will reuse the existing config instead of forcing re-registration.
 - Configures the runner with the provided options. SIGINT/SIGTERM triggers deregistration when `cleanup_on_stop` is `true`.
@@ -31,8 +32,9 @@ Runs a GitHub self-hosted runner inside Home Assistant Supervisor by downloading
 ## Restart-Friendly Design
 This add-on is designed to restart without requiring new tokens:
 1. **First run**: Provide `github_token` to register
-2. **Subsequent restarts**: Leave `github_token` empty to reconnect automatically, or provide a PAT to force re-registration
-3. **Token expiry**: Registration tokens expire after 1 hour, but once registered, the runner maintains its own credentials
+2. **Subsequent restarts**: Set `cleanup_on_stop: false` and leave `github_token` empty to reconnect automatically
+3. **Force re-registration**: Set `force_reregister: true` with a PAT or fresh registration token when you want a clean re-register
+4. **Token expiry**: Registration tokens expire after 1 hour, but once registered, the runner maintains its own credentials
 
 ## Security Notes
 - Do **not** expose SSH; the container is outbound-only. Restrict any SSH access to LAN/VPN if you must enable it.
