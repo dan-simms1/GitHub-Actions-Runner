@@ -7,7 +7,8 @@ RUNNER_ROOT="/data/actions-runner"
 LEGACY_RUNNER_ROOT="/opt/gha/actions-runner"
 DEFAULT_RUNNER_VERSION="latest"   # was 2.317.0, which can 404
 CLEANUP_ON_STOP="true"
-ADDON_VERSION="1.1.21"
+ADDON_VERSION="1.1.22"
+RUNNER_PID=""
 
 timestamp() {
   # BusyBox: date -Iseconds
@@ -344,6 +345,22 @@ cleanup_runner() {
     exit 0
   fi
   log warn "Cleaning up runner registration"
+  if [[ -n "${RUNNER_PID}" ]]; then
+    if kill -0 "${RUNNER_PID}" 2>/dev/null; then
+      log info "Stopping runner process (pid ${RUNNER_PID})"
+      kill "${RUNNER_PID}" 2>/dev/null || true
+      local waited=0
+      while kill -0 "${RUNNER_PID}" 2>/dev/null; do
+        if [[ "${waited}" -ge 20 ]]; then
+          log warn "Runner did not exit; sending SIGKILL"
+          kill -9 "${RUNNER_PID}" 2>/dev/null || true
+          break
+        fi
+        sleep 1
+        waited=$((waited + 1))
+      done
+    fi
+  fi
   if [[ -f ".runner" ]]; then
     if [[ -n "${RUNNER_CLEANUP_TOKEN:-}" ]]; then
       if as_runner ./config.sh remove --token "${RUNNER_CLEANUP_TOKEN}" >/dev/null 2>&1; then
@@ -364,7 +381,8 @@ cleanup_runner() {
 start_runner_as_runner() {
   log info "Starting GitHub Actions runner service (as runner user)"
   as_runner ./run.sh &
-  local pid=$!
+  RUNNER_PID=$!
+  local pid="${RUNNER_PID}"
   sleep 2
   if kill -0 "${pid}" 2>/dev/null; then
     log info "Runner process is running (pid ${pid})"
@@ -373,6 +391,7 @@ start_runner_as_runner() {
   fi
   wait "${pid}"
   local code=$?
+  RUNNER_PID=""
   log warn "Runner exited with status ${code}"
   return "${code}"
 }
