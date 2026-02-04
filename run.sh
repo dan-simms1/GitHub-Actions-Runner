@@ -6,7 +6,7 @@ OPTIONS_FILE="/data/options.json"
 RUNNER_ROOT="/data/actions-runner"
 LEGACY_RUNNER_ROOT="/opt/gha/actions-runner"
 DEFAULT_RUNNER_VERSION="latest"   # was 2.317.0, which can 404
-ADDON_VERSION="1.1.26"
+ADDON_VERSION="1.1.27"
 RUNNER_PID=""
 
 timestamp() {
@@ -343,9 +343,14 @@ shutdown_runner() {
   if [[ -n "${RUNNER_PID}" ]]; then
     if kill -0 "${RUNNER_PID}" 2>/dev/null; then
       log info "Stopping runner process (pid ${RUNNER_PID})"
-      kill "${RUNNER_PID}" 2>/dev/null || true
+      # SIGINT allows the runner to disconnect cleanly
+      kill -INT "${RUNNER_PID}" 2>/dev/null || true
       local waited=0
       while kill -0 "${RUNNER_PID}" 2>/dev/null; do
+        if [[ "${waited}" -eq 5 ]]; then
+          log warn "Runner still exiting; sending SIGTERM"
+          kill -TERM "${RUNNER_PID}" 2>/dev/null || true
+        fi
         if [[ "${waited}" -ge 20 ]]; then
           log warn "Runner did not exit; sending SIGKILL"
           kill -9 "${RUNNER_PID}" 2>/dev/null || true
