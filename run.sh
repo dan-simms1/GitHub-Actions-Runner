@@ -6,7 +6,7 @@ OPTIONS_FILE="/data/options.json"
 RUNNER_ROOT="/data/actions-runner"
 LEGACY_RUNNER_ROOT="/opt/gha/actions-runner"
 DEFAULT_RUNNER_VERSION="latest"   # was 2.317.0, which can 404
-ADDON_VERSION="1.1.31"
+ADDON_VERSION="1.1.33"
 RUNNER_PID=""
 
 timestamp() {
@@ -384,12 +384,17 @@ start_runner_as_runner() {
       local skip_line="false"
       if [[ "${line}" == *"A session for this runner already exists."* || "${line}" == *"Runner connect error: Error: Conflict."* ]]; then
         if [[ "${conflict_noted}" != "true" ]]; then
-          log_force warn "GitHub needs 2-3 minutes to allow this runner to reconnect"
+          log_force warn "Connected to GitHub - the runner will take 2-3 minutes to activate"
           conflict_noted="true"
         fi
         skip_line="true"
-      elif [[ "${line}" == "√ Connected to GitHub"* && "${conflict_noted}" == "true" ]]; then
-        skip_line="true"
+      elif [[ "${line}" == "√ Connected to GitHub"* ]]; then
+        if [[ "${conflict_noted}" == "true" ]]; then
+          skip_line="true"
+        else
+          log_force info "Connected to GitHub"
+          skip_line="true"
+        fi
       elif [[ "${line}" == *"Runner reconnected."* || "${line}" == *"Listening for Jobs"* ]]; then
         conflict_noted="false"
       fi
