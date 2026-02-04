@@ -6,7 +6,7 @@ OPTIONS_FILE="/data/options.json"
 RUNNER_ROOT="/data/actions-runner"
 LEGACY_RUNNER_ROOT="/opt/gha/actions-runner"
 DEFAULT_RUNNER_VERSION="latest"   # was 2.317.0, which can 404
-ADDON_VERSION="1.1.30"
+ADDON_VERSION="1.1.31"
 RUNNER_PID=""
 
 timestamp() {
@@ -43,6 +43,13 @@ log() {
   if [[ "${lvl_num}" -lt "${CURRENT_LOG_LEVEL}" ]]; then
     return
   fi
+  printf '%s [%s] %s\n' "$(timestamp)" "${level^^}" "${msg}"
+}
+
+log_force() {
+  local level="${1,,}"
+  shift || true
+  local msg="$*"
   printf '%s [%s] %s\n' "$(timestamp)" "${level^^}" "${msg}"
 }
 
@@ -377,7 +384,7 @@ start_runner_as_runner() {
       local skip_line="false"
       if [[ "${line}" == *"A session for this runner already exists."* || "${line}" == *"Runner connect error: Error: Conflict."* ]]; then
         if [[ "${conflict_noted}" != "true" ]]; then
-          log warn "GitHub needs 2-3 minutes to allow this runner to reconnect"
+          log_force warn "GitHub needs 2-3 minutes to allow this runner to reconnect"
           conflict_noted="true"
         fi
         skip_line="true"
